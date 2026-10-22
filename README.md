@@ -7,7 +7,7 @@
 **只需点一下就算一只虫**——基于点监督密度估计的农田害虫自动计数系统。
 输入诱捕板照片，输出害虫数量、密度热力图与逐板计数报告，并支持 ONNX INT8 端侧部署。
 
-[![ci](https://github.com/<your-name>/pestcount/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
+[![ci](https://github.com/zhao-si-yu/pestcount/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![torch](https://img.shields.io/badge/PyTorch-2.x-red)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -89,7 +89,7 @@
 ## 快速开始（无需任何数据，5 分钟跑通）
 
 ```bash
-git clone https://github.com/<your-name>/pestcount.git
+git clone https://github.com/zhao-si-yu/pestcount.git
 cd pestcount
 pip install -r requirements.txt
 
@@ -216,9 +216,9 @@ pestcount/
 ```bibtex
 @misc{pestcount2026,
   title  = {PestCount: Point-supervised Density Estimation for Field Pest Counting},
-  author = {Your Name},
+  author = {zhao-si-yu},
   year   = {2026},
-  url    = {https://github.com/<your-name>/pestcount}
+  url    = {https://github.com/zhao-si-yu/pestcount}
 }
 ```
 
