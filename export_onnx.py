@@ -42,19 +42,39 @@ def export_fp32(model, dummy, out_path: Path, dynamic: bool) -> None:
     import onnx  # noqa: F401  (显式依赖检查)
 
     axes = {"input": {2: "h", 3: "w"}, "density": {2: "h", 3: "w"}} if dynamic else None
+    # dynamo=False：用 legacy exporter，权重内联进 .onnx 单文件。
+    # torch>=2.7 的新导出器默认把权重写到外部 .onnx.data，部署时容易漏文件
     torch.onnx.export(
         model, dummy, str(out_path),
         input_names=["input"], output_names=["density"],
         opset_version=17, do_constant_folding=True, dynamic_axes=axes,
+        dynamo=False,
     )
+    # 兜底：若仍产生外部数据文件，合并回单文件
+    data_file = out_path.with_name(out_path.name + ".data")
+    if data_file.exists():
+        m = onnx.load(str(out_path), load_external_data=True)
+        for tensor in m.graph.initializer:
+            if tensor.data_location == onnx.TensorProto.EXTERNAL:
+                tensor.data_location = onnx.TensorProto.DEFAULT
+                tensor.ClearField("external_data")
+        onnx.save(m, str(out_path))
+        data_file.unlink()
     print(f"[ok] ONNX 导出 {out_path}  {out_path.stat().st_size/1e6:.2f} MB  "
           f"dynamic_axes={'on' if dynamic else 'off'}")
 
 
 def quantize_int8(fp32_path: Path, out_path: Path, calib_json: str,
                   data_root: str, infer_size: int, n_calib: int = 48) -> None:
-    from onnxruntime.quantization import (CalibrationDataReader, QuantType,
-                                          quantize_static)
+    from onnxruntime.quantization import (CalibrationDataReader, QuantFormat,
+                                          QuantType, quantize_static)
+    from onnxruntime.quantization.shape_inference import quant_pre_process
+
+    # 量化前先做官方预处理（shape inference + 常量折叠），
+    # 否则 SiLU 的 Mul 节点在量化时会报 ShapeInferenceError
+    pre_path = fp32_path.with_name(fp32_path.stem + "_pre.onnx")
+    quant_pre_process(str(fp32_path), str(pre_path), skip_optimization=False,
+                      skip_shape_inference=False)
 
     from pestcount.dataset import PointCountDataset, load_index
     from pestcount.utils import denormalize
@@ -62,9 +82,16 @@ def quantize_int8(fp32_path: Path, out_path: Path, calib_json: str,
     items = load_index(calib_json)["items"][:n_calib]
     ds = PointCountDataset(items, data_root, mode="val", infer_size=infer_size)
 
+    def _square(t: "torch.Tensor") -> "np.ndarray":
+        """固定形状导出的模型要求方形输入；校准图统一 resize 到方形。"""
+        import cv2
+        arr = t.numpy().transpose(1, 2, 0)
+        arr = cv2.resize(arr, (infer_size, infer_size), interpolation=cv2.INTER_LINEAR)
+        return arr.transpose(2, 0, 1)[None].astype(np.float32)
+
     class Reader(CalibrationDataReader):
         def __init__(self) -> None:
-            self.data = [{"input": ds[i]["image"].unsqueeze(0).numpy()} for i in range(len(ds))]
+            self.data = [{"input": _square(ds[i]["image"])} for i in range(len(ds))]
             self.i = 0
 
         def get_next(self):
@@ -74,8 +101,9 @@ def quantize_int8(fp32_path: Path, out_path: Path, calib_json: str,
             self.i += 1
             return item
 
-    quantize_static(str(fp32_path), str(out_path), Reader(),
-                    quant_format=QuantType.QInt8,
+    quantize_static(str(pre_path), str(out_path), Reader(),
+                    quant_format=QuantFormat.QDQ,      # x64 CPU 上 QDQ 有更好的算子融合
+                    op_types_to_quantize=["Conv"],
                     per_channel=True, reduce_range=False)
     print(f"[ok] INT8 量化 {out_path}  {out_path.stat().st_size/1e6:.2f} MB")
 

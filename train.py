@@ -30,6 +30,7 @@ from pestcount.dataset import PointCountDataset, collate, load_index
 from pestcount.loss import DensityCountLoss
 from pestcount.metrics import count_metrics, summarize
 from pestcount.model import build_model, count_parameters
+from pestcount.predictor import load_checkpoint
 from pestcount.utils import set_seed
 
 
@@ -52,6 +53,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--grid", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--limit", type=int, default=0, help="debug: 只取前 N 条样本")
+    p.add_argument("--init-weights", type=str, default="",
+                   help="从已有权重热启动（两阶段训练第二步：合成预训练 -> 真实微调）")
     p.add_argument("--no-amp", action="store_true")
     return p.parse_args()
 
@@ -109,6 +112,10 @@ def main() -> None:
 
     train_loader, val_loader = build_loaders(args)
     model = build_model(width=args.width).to(device)
+    if args.init_weights:
+        blob = load_checkpoint(args.init_weights, device)
+        model.load_state_dict(blob.get("model", blob))
+        print(f"init weights from {args.init_weights}")
     n_param = count_parameters(model)
     print(f"device={device}  params={n_param/1e6:.3f}M  "
           f"train={len(train_loader.dataset)}  val={len(val_loader.dataset)}")

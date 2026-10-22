@@ -60,6 +60,32 @@
 
 <!--RESULTS_TABLE-->
 
+### 计数精度（合成数据 sanity check，val 32 张，管线端到端验证）
+
+| 指标 | 数值 | 说明 |
+|---|---|---|
+| MAE | **1.05** | 平均绝对计数误差（平均真值 27 只/板） |
+| RMSE | 1.39 | |
+| 计数准确率 | **95.8%** | 1 − \|pred−gt\|/gt |
+| Bias | +0.02 | 无系统性高估/低估 |
+| 参数量 | 0.33M | FP32 单文件 1.34 MB，INT8 **0.38 MB** |
+
+### 部署基准（RTX 4060 Laptop / 1024×1024 / warmup 10 + 50 次实测）
+
+| 版本 | 后端 | 体积(MB) | 延迟均值(ms) | 延迟P90(ms) | 显存(MB) |
+|---|---|---|---|---|---|
+| PyTorch FP32 | CUDA | 1.26 | **7.7** | 8.2 | 182 |
+| ONNX FP32 | CPU | 1.27 | 93.5 | 97.7 | — |
+| ONNX INT8 | CPU | **0.36** | 96.0 | 113.9 | — |
+
+两点诚实说明：
+* **INT8 在桌面 CPU 上未获得加速**：ONNX Runtime CPU EP 对 QDQ 卷积的融合
+  依赖指令集支持，量化收益主要体现在边缘 ARM 平台（NNAPI / RKNN 通常
+  2~4×）；桌面场景直接用 CUDA 版即可。INT8 的价值在这里体现在**体积
+  缩小 3.7 倍**与量化后计数偏差仅 **0.19%**；
+* 复现方式：`python benchmark.py --ckpt checkpoints/best.pt`，
+  换机器数字会变，请以自己实测为准。
+
 ## 快速开始（无需任何数据，5 分钟跑通）
 
 ```bash
@@ -78,7 +104,7 @@ python tools/make_synthetic.py --num 160 --out-images data/images \
 python tools/split_dataset.py --src data/annotations/all_synthetic.json \
     --out-dir data/annotations --ratios 0.8 0.2 0
 
-# 4. 训练（RTX 4060 约 4 分钟）
+# 4. 训练（RTX 4060 实测约 5 分钟，60 epoch）
 python train.py --epochs 60 --batch 8 --crop 512
 
 # 5. 评估 + 保存可视化三联图
@@ -101,10 +127,42 @@ python tools/make_synthetic.py --num 600 --out-images data/images \
 # 4. 两阶段训练：合成集预训练 → 真实集微调
 python train.py --train-json data/annotations/synthetic.json --epochs 60
 python train.py --train-json data/annotations/train.json --epochs 120 \
-    --ckpt checkpoints/last.pt        # 从合成权重热启动
+    --init-weights checkpoints/last.pt   # 从合成权重热启动
 ```
 
 标注规范与 JSON 格式见 [`data/README.md`](data/README.md)。
+
+## 公开数据集
+
+时间紧、拍不到板子时，可以直接用公开数据集起步。`tools/download_datasets.py`
+内置了清单（`--list`）、断点续传下载（`--get`）和解压（`--extract`）：
+
+| 数据集 | 标注类型 | 规模 | 适配度 |
+|---|---|---|---|
+| **PST**（[Zenodo](https://zenodo.org/records/7801239)，CC BY 4.0） | **点标注** CSV | 144 MB，黄板白粉虱 | ★★★ 原生点标注，`--format pst-csv` 直接可用 |
+| **Yellow Sticky Traps**（[GitHub](https://github.com/GEMIT-Institute-of-HS-Niederrhein/yellow-sticky-traps-dataset)） | VOC 框 | 284 张 / 8114 框，3 类 | ★★☆ 场景最贴近，需框转点 |
+| Yellow Sticky Traps（[Kaggle](https://www.kaggle.com/datasets/friso1987/yellow-sticky-traps)） | VOC 框 | 808 MB，CC0 | ★★☆ 许可最宽松 |
+| AgriPest（[论文](https://doi.org/10.3390/s21051601) / 原仓库已 404） | 框 | 49.7K 图 / 264.7K 框 | ★★★ 田间害虫语义最匹配，需自行找可用地址 |
+| IP102（[GitHub](https://github.com/xpwu95/IP102)） | 分类 + 部分框 | 75K 图 / 102 类 | ★☆☆ 单虫特写，不适合计数 |
+
+```bash
+python tools/download_datasets.py --list                 # 看清单与许可
+python tools/download_datasets.py --get pst              # 断点续传，可中断重跑
+python tools/download_datasets.py --extract pst
+
+# 公开数据集几乎都是「框」，用转换脚本变成「点」才能喂给本项目
+python tools/convert_annotations.py --format pst-csv \
+    --images data/raw/pest-sticky-traps/train \
+    --ann data/raw/pest-sticky-traps/train/annotations.csv \
+    --out data/images/pst --out-json data/annotations/pst.json
+
+python tools/split_dataset.py --src data/annotations/pst.json \
+    --out-dir data/annotations --ratios 0.8 0.2 0
+```
+
+> 网络提示：Zenodo / HuggingFace 在国内常不可达，GitHub 大文件直连约 200~300 KB/s，
+> GB 级数据集建议挂夜间下载。若长期不可达，自采 100~200 张板照片（手机拍 + 本仓库
+> 标注工具约 2 小时）往往比等下载更快，且数据是自己的，简历/论文里更好讲。
 
 ## 评估 / 导出 / 基准
 
@@ -135,6 +193,8 @@ pestcount/
 │   ├── annotate.py          # tkinter 点标注工具
 │   ├── make_synthetic.py    # 合成数据生成（自动出点标注）
 │   ├── make_demo_assets.py  # 无数据 demo 素材
+│   ├── convert_annotations.py  # VOC/COCO/YOLO/PST-CSV -> 点标注
+│   ├── download_datasets.py # 公开数据集清单与断点续传下载
 │   ├── split_dataset.py     # 按密度分层的 train/val 划分
 │   └── count_cli.py         # 无 GUI 批量计数
 ├── train.py / evaluate.py / export_onnx.py / benchmark.py / app.py
