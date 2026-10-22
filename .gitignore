@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# 模型权重与导出文件（用 Release 分发，不进仓库）
+*.pt
+*.pth
+*.onnx
+*.engine
+checkpoints/*
+!checkpoints/.gitkeep
+
+# 数据集与合成数据（体积大、含采样现场信息，不进仓库）
+data/images/*
+!data/images/.gitkeep
+!data/images/example.jpg
+assets/boards/*
+!assets/boards/.gitkeep
+!assets/boards/example_board.jpg
+assets/insects/*
+!assets/insects/.gitkeep
+!assets/insects/example_insect.png
+
+# 运行产物
+runs/
+*.csv
+!docs/figures/*.csv
+result.csv
+pest_count_result.csv
+
+# 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
