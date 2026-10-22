@@ -1,0 +1,8 @@
+# 统一换行符，避免 Windows 提交带 CRLF 让 diff 全是噪音
+* text=auto eol=lf
+
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.pt binary
+*.onnx binary
